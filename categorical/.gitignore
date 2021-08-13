@@ -1,0 +1,13 @@
+/.idea
+/.ipynb_checkpoints
+/my_model
+/data
+/live-project
+/categorical-out/
+/data/
+/logs/
+/out_tuning_bayesian/
+/out_tuning_hyperband/
+/out_tuning_random_search/
+/second-step-data-categorical/
+/__pycache__/
