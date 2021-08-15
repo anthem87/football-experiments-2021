@@ -1,13 +1,11 @@
-# %%
 import numpy as np
 import pandas as pd
-import pandas.io.sql as sqlio
 import os
 from os import listdir
 import shutil
-
-from CategoricalMerger import Merger
-from CategoricalParser import Parser
+from PredictionDataBuilder import PredictionDataBuilder
+from Merger import Merger
+from Parser import Parser
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.callbacks import TensorBoard
@@ -15,24 +13,13 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Dropout
 from tensorflow.keras.utils import to_categorical
-
 import kerastuner as kt
 from kerastuner.tuners import RandomSearch
 from kerastuner.tuners import BayesianOptimization
-
 import matplotlib.pyplot as plt
-import plotly.offline as py
-
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import QuantileTransformer
 from sklearn.preprocessing import LabelEncoder
-
-from sqlalchemy import create_engine
-import psycopg2
-
-import seaborn as sns
 
 tensorboard = TensorBoard(
     log_dir='./logs',
@@ -49,11 +36,8 @@ def set_gpu_on():
             tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
             print("LOADED GPU")
         except RuntimeError as e:
-            # Visible devices must be set at program startup
             print(e)
 
-
-# %%
 
 def load_parse_and_merge():
     files = []
@@ -69,7 +53,7 @@ def load_parse_and_merge():
 
     for idx, file in enumerate(files):
         ps = Parser()
-        print('Parsing file number ' + str(idx + 1) + ' with name ' + file.title() + ' of ' + str(total))
+        print('Parsing file number ' + str(idx + 1) + ' of ' + str(total))
         ps.parse_excel(file)
 
     files = []
@@ -84,21 +68,6 @@ def load_parse_and_merge():
 
 keras_callbacks = [tensorboard, EarlyStopping()]
 
-
-def save_to_postgres():
-    path = './out/out.xlsx'
-    games = pd.read_excel(path, engine='openpyxl')
-    conn = create_engine('postgresql+psycopg2://postgres:***REMOVED***@localhost:5432/dl-soccer')
-    games.to_sql('games', con=conn, if_exists='replace')
-
-
-def load_games_slq():
-    conn = create_engine('postgresql+psycopg2://postgres:***REMOVED***@localhost:5432/dl-soccer')
-    sql = "select * from games;"
-    return pd.read_sql_query(sql, conn)
-
-
-# games = load_games_slq()
 games = pd.read_excel("./out/out.xlsx")
 
 y = games['Final-Result']
@@ -108,13 +77,10 @@ encoder.fit(y)
 y = encoder.transform(y)
 y = to_categorical(y)
 
-games.drop('Final-Result', axis=1, inplace=True)
+X = games = games.drop('Final-Result', axis=1)
 
-X = games
-# %%
-
-scaler_X = QuantileTransformer()
-scaled_X = pd.DataFrame(scaler_X.fit_transform(X), index=X.index, columns=X.columns)
+scaler_X = QuantileTransformer().fit(X)
+scaled_X = pd.DataFrame(scaler_X.transform(X), index=X.index, columns=X.columns)
 
 X_train, X_test, y_train, y_test = train_test_split(scaled_X, y, test_size=0.33, random_state=True)
 X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.25, random_state=False)
@@ -122,8 +88,6 @@ X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.
 model_input_shape = X_train.shape[1]
 max_model_input_shape = model_input_shape + (32 * 7)
 
-
-# %%
 
 def tune_model(hp):
     activation = tf.keras.activations.tanh
@@ -203,7 +167,7 @@ def define_tuners(hypermodel, directory, project_name):
     bayesian_tuner = BayesianOptimization(
         hypermodel,
         objective=objective,
-        max_trials=5,
+        max_trials=10,
         executions_per_trial=1,
         directory=directory + '_bayesian',
         project_name=project_name
@@ -231,39 +195,30 @@ def make_tuning(idx):
 
 
 def get_best_model():
-    best_model = None
+    tuner = make_tuning(1)
 
-    try:
-        tuner = make_tuning(1)
+    best_model = tuner.get_best_models(num_models=1)[0]
 
-        best_model = tuner.get_best_models(num_models=1)[0]
-
-        loss, accuracy = best_model.evaluate(X_test, y_test)
-        best_model.summary()
-    except:
-        print('error while parsing')
+    loss, accuracy = best_model.evaluate(X_test, y_test)
+    best_model.summary()
     return best_model
 
 
-def sample_predict(best_model):
-    home = pd.read_excel('./prediction-for-result/Lecce-prediction.xlsx')
-    away = pd.read_excel('./prediction-for-result/Chievo-prediction.xlsx')
+def sample_predict(best_model, all_games: pd.DataFrame):
+    PredictionDataBuilder('Lens', 'Saint-Étienne')
 
-    match = pd.concat([home, away], axis=1)
+    data = pd.read_excel('./temp_prediction/out.xlsx')
 
-    match = np.array(match)
+    data = pd.concat([data, all_games]).reset_index(drop=True)
 
-    # print(atalanta_vs_spezia)
-
-    scaler_predict = scaler_X
-    scaled_predict = scaler_predict.fit_transform(match)
+    scaled_predict = scaler_X.transform(data)
 
     raw_predictions = best_model.predict(scaled_predict)
     predictions_max = np.argmax(raw_predictions, axis=1)
-    prediction_ = encoder.inverse_transform(predictions_max)
+    prediction = encoder.inverse_transform(predictions_max)
 
-    print(raw_predictions)
-    print(prediction_)
+    print(raw_predictions[0])
+    print(prediction[0])
 
 
 def load_model():
@@ -274,32 +229,13 @@ def reset_model(model):
     model.reset_states()
 
 
-# parse_for_prediction()
 set_gpu_on()
 # load_parse_and_merge()
-# model = load_model()
+model = load_model()
 # reset_model(model)
+# model = get_best_model()
+# run_model(model, 200)
 # model.evaluate(X_test, y_test)
 # model.summary()
-# save_to_postgres()
-# load_games_slq()
-model = get_best_model()
-run_model(model, 100)
-model.evaluate(X_test, y_test)
-# model.summary()
-# sample_predict(model)
+sample_predict(model, games)
 
-
-for file in listdir('./second-step-data'):
-    file = './second-step-data/' + file
-    team = pd.read_excel(file, header=None)
-    if (len(team.index) - 1) % 4 != 0:
-        print(file)
-
-for file in listdir('./second-step-data'):
-    file = './second-step-data/' + file
-    team = pd.read_excel(file, header=None)
-    print(team)
-    team.drop(team.tail(3).index, inplace=True)
-    print(team)
-    break
