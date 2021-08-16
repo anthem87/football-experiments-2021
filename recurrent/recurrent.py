@@ -10,17 +10,11 @@ from tensorflow.keras.layers import Bidirectional
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Dropout
 from tensorflow.keras.layers import LSTM
-
+from PredictionDataBuilder import PredictionDataBuilder
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import QuantileTransformer
-from sklearn.preprocessing import LabelEncoder as encoder
-
-from sqlalchemy import create_engine
-
-from RecurrentMerger import RecurrentMerger
-from RecurrentParser import RecurrentParser
-
-# py.init_notebook_mode(connected=True)
+from Merger import Merger
+from Parser import Parser
 
 tensorboard = TensorBoard(
     log_dir='./logs',
@@ -44,26 +38,6 @@ def set_gpu_on():
             print(e)
 
 
-def save_to_postgres(recurrent: bool):
-    if recurrent:
-        path = './out-recurrent/out.xlsx'
-    else:
-        path = './out/out.xlsx'
-
-    print('Opening file...')
-    games = pd.read_excel(path, engine='openpyxl')
-    print('Connecting...')
-    conn = create_engine('postgresql+psycopg2://postgres:***REMOVED***@localhost:5432/dl-soccer')
-    print('Saving to db...')
-    games.to_sql('games_for_recurrent', con=conn, if_exists='replace')
-
-
-def load_games_slq():
-    conn = create_engine('postgresql+psycopg2://postgres:***REMOVED***@localhost:5432/dl-soccer')
-    sql = "select * from games_for_recurrent;"
-    return pd.read_sql_query(sql, conn)
-
-
 def load_parse_and_merge():
     files = []
 
@@ -74,17 +48,18 @@ def load_parse_and_merge():
     total = len(files)
 
     for idx, file in enumerate(files):
-        ps = RecurrentParser()
+        ps = Parser()
         print('Parsing file number ' + str(idx + 1) + ' with name ' + file.title() + ' of ' + str(total))
         ps.parse_excel(file)
+        break
 
     files = []
 
-    for file in listdir('./second-step-data-recurrent'):
-        file = './second-step-data-recurrent/' + file
+    for file in listdir('./second-step-data'):
+        file = './second-step-data/' + file
         files.append(file)
 
-    nm = RecurrentMerger()
+    nm = Merger()
     nm.load_excels(files)
 
 
@@ -95,37 +70,52 @@ def load_parse_and_merge():
 
 keras_callbacks = [tensorboard, EarlyStopping()]
 
-games = pd.read_excel("./recurrent-out/recurrent-out.xlsx")
+games = pd.read_excel("./out/out.xlsx")
 
-games.drop('Final-Result', axis=1, inplace=True)
+games.drop('Score-Differential', axis=1, inplace=True)
 games.sort_index(ascending=False)
 
-y = []
-X = []
+X = pd.DataFrame(columns=games.columns)
+y = pd.DataFrame(columns=games.columns)
 
 
-def split_input_outputs(data_X: pd.DataFrame):
+def split_input_outputs(data_X: pd.DataFrame, train_x: pd.DataFrame, train_y: pd.DataFrame):
     stopper = 0
+    X = train_x
+    y = train_y
     for idx, row in data_X.iterrows():
         if idx == 4 - 1 + stopper:
             stopper += 4
-            y.append(row)
+            df_y = row.to_frame().T
+            temp_y = pd.concat([df_y, y]).reset_index(drop=True)
+            y = temp_y
         else:
-            X.append(row)
+            df_x = row.to_frame().T
+            temp_x = pd.concat([df_x, X]).reset_index(drop=True)
+            X = temp_x
         print('working on row number ' + str(idx))
+    return X, y
 
 
-split_input_outputs(games)
+X, y = split_input_outputs(games, X, y)
 
-scaler_X = QuantileTransformer()
-scaled_X = pd.DataFrame(scaler_X.fit_transform(X))
-scaled_y = pd.DataFrame(scaler_X.fit_transform(y))
+scaler_X = QuantileTransformer().fit(X)
+scaler_y = QuantileTransformer().fit(y)
+
+
+X_train = scaled_X = pd.DataFrame(scaler_X.transform(X), index=X.index, columns=X.columns)
+y_train = scaled_y = pd.DataFrame(scaler_y.transform(y), index=y.index, columns=y.columns)
+
+print(X_train, y_train)
 
 X_train, y_train = np.array(scaled_X), np.array(scaled_y)
 
 X_train = np.reshape(X_train, (y_train.shape[0], 3, X_train.shape[1]))
 y_train = np.reshape(y_train, (y_train.shape[0], 1, y_train.shape[1]))
+
+print("X_TRAIN SHAPE")
 print(X_train.shape)
+print("Y_TRAIN SHAPE")
 print(y_train.shape)
 
 X_train, X_test = train_test_split(X_train, test_size=0.33, random_state=False)
@@ -140,7 +130,7 @@ output_shape = y_train.shape[1]
 
 def get_model():
     activation = tf.keras.activations.tanh
-    units = 3
+    recurrent_activation = tf.keras.activations.sigmoid
     drop_out_layer = Dropout(0.3)
     learning_rate = 0.00001
     lr_schedule = keras.optimizers.schedules.ExponentialDecay(
@@ -155,15 +145,20 @@ def get_model():
 
     model.add(
         Bidirectional(
-            LSTM(units=units, return_sequences=True, input_shape=model_input_shape, name='Bidirectional')
+            LSTM(units=3,
+                 input_shape=(208, 3),
+                 activation=activation,
+                 recurrent_activation=recurrent_activation,
+                 return_sequences=True,
+                 name='Bidirectional')
         )
     )
     # model.add(drop_out_layer)
     for i in range(7, 12):
-        model.add(LSTM(units=units, return_sequences=True, name='LSTM_' + str(i)))
+        model.add(LSTM(units=3, return_sequences=True, name='LSTM_' + str(i)))
 
         model.add(drop_out_layer)
-    model.add(Dense(output_shape, activation='linear', name='Dense_Output'))
+    model.add(Dense(output_shape, activation=activation, name='Dense_Output'))
 
     model.compile(optimizer,
                   loss=loss,
@@ -192,49 +187,41 @@ def run_model(model, epochs):
     plt.show()
 
     model.evaluate(X_test, y_test, verbose=True)
-    model.save('./my_model_recurrent')
+    model.save('./my_model/saved_model.h5')
     return model
 
 
-def sample_predict(best_model):
-    home = pd.read_excel('./prediction-for-result/Lecce-prediction.xlsx')
-    away = pd.read_excel('./prediction-for-result/Chievo-prediction.xlsx')
+def sample_predict(best_model, all_games: pd.DataFrame):
+    PredictionDataBuilder('Leicester City')
 
-    match = pd.concat([home, away], axis=1)
+    data = pd.read_excel('./temp_prediction/out.xlsx')
 
-    match = np.array(match)
+    scaled_predict = scaler_X.transform(data)
 
-    # print(atalanta_vs_spezia)
-
-    scaler_predict = scaler_X
-    scaled_predict = scaler_predict.fit_transform(match)
+    scaled_predict = np.array(scaled_predict)
 
     raw_predictions = best_model.predict(scaled_predict)
     predictions_max = np.argmax(raw_predictions, axis=1)
-    prediction_ = encoder.inverse_transform(predictions_max)
+    prediction = scaler_y.inverse_transform(predictions_max)
 
     print(raw_predictions)
-    print(prediction_)
+    print(prediction)
 
 
 def load_model():
-    return keras.models.load_model('my_model_recurrent')
+    return keras.models.load_model('./my_model/saved_model.h5')
 
 
 def reset_model(model):
     model.reset_states()
 
 
-# TODO creare dati per simulare predizione
-# TODO scaricare più dati da wyscout
-
-# parse_for_prediction()
-# set_gpu_on()
+set_gpu_on()
 # load_parse_and_merge()
 # model = load_model()
 # reset_model(model)
 # model.evaluate(X_test, y_test)
-# model = get_model()
-# run_model(model, 1000)
+model = get_model()
+# run_model(model, 2)
 # model.summary()
-# sample_predict(model)
+sample_predict(model, games)
