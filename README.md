@@ -34,9 +34,11 @@ The commits keep their original 2021 dates.
 - `first commit` (13 Aug 2021): the complete, coherent version of each experiment.
 - `major modifications` (15–16 Aug 2021): I started a refactor. Among other fixes it introduced a separate
   scaler for the targets in `recurrent/` and stopped re-fitting the scaler on prediction data in `categorical/`.
-  The refactor moved the pipeline into shared `Parser`, `Merger` and `PredictionDataBuilder` modules;
-  those modules and the iterations that followed were never pushed and are lost.
-  The latest version of the two scripts therefore imports modules that no longer exist.
+  The refactor moved the pipeline into shared `Parser`, `Merger` and `PredictionDataBuilder` modules.
+- Many later commits were reset and are gone, together with the corrections they contained.
+  What survives is only this early stage of the work, so several of the issues listed below
+  had already been addressed in versions that no longer exist.
+  For the same reason the latest version of the two scripts imports modules that are not in the repository.
 - In 2026 I merged the two original repositories into this one and restored the pipeline files from the first commits.
   The 2021 code has not been edited.
 
