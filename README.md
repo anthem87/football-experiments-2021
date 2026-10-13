@@ -44,12 +44,18 @@ The commits keep their original 2021 dates.
 
 The Wyscout data is licensed and is not included, so the code cannot be run as-is.
 
+## Design choices
+
+- **Score-Differential as a feature (deliberate).** In `categorical/` the goal difference is kept among the inputs on purpose:
+  the network learns how match statistics, including goal difference, map to the outcome, and at prediction time
+  `PredictionDataBuilder` was meant to supply those features from each team's recent matches, where goal difference
+  acts as a form indicator. The trade-off: during training the label is exactly the sign of that column, so the reported
+  accuracy measures how well the network learned the rule, not how well it forecasts. Today I would also train a variant
+  without it, to see how much the other statistics carry on their own.
+
 ## What I would change today
 
 **Evaluation**
-- Remove the label leak in `categorical/`: `Score-Differential` stays among the features,
-  and the HOME / DRAW / AWAY label is just its sign, so the classifier is shown the answer.
-  `recurrent/` drops the column in its second commit; `categorical/` never does.
 - Split the data by time (train on earlier matches, test on later ones) instead of shuffling,
   so the score reflects real forecasting rather than interpolation between neighbouring matches.
 - Fit the scalers on the training set only. They are currently fitted on the whole dataset before the split.
