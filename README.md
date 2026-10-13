@@ -52,12 +52,14 @@ The Wyscout data is licensed and is not included, so the code cannot be run as-i
   acts as a form indicator. The trade-off: during training the label is exactly the sign of that column, so the reported
   accuracy measures how well the network learned the rule, not how well it forecasts. Today I would also train a variant
   without it, to see how much the other statistics carry on their own.
+- **Random train/test split (deliberate).** Matches are treated as independent samples: the assumption is that the way
+  match statistics relate to the outcome does not depend on when the match was played, so shuffling is a valid way to
+  measure how well that relationship was learned. The trade-off: if the game drifts over time (tactics, squads, seasons),
+  a random split hides it. A time-based split would be the stricter check of forecasting ability.
 
 ## What I would change today
 
 **Evaluation**
-- Split the data by time (train on earlier matches, test on later ones) instead of shuffling,
-  so the score reflects real forecasting rather than interpolation between neighbouring matches.
 - Fit the scalers on the training set only. They are currently fitted on the whole dataset before the split.
 - Split `X` and `y` in the same `train_test_split` call in `recurrent/`. They stay aligned only because both calls use the same seed.
 - Compare against simple baselines (always predict a home win, bookmaker odds) before reading anything into the accuracy.
