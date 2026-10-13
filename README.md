@@ -56,6 +56,11 @@ The Wyscout data is licensed and is not included, so the code cannot be run as-i
   match statistics relate to the outcome does not depend on when the match was played, so shuffling is a valid way to
   measure how well that relationship was learned. The trade-off: if the game drifts over time (tactics, squads, seasons),
   a random split hides it. A time-based split would be the stricter check of forecasting ability.
+- **Date kept as a feature (deliberate).** The match date is converted to a number and left among the inputs
+  as a control for the assumption above: if outcomes really do not depend on when a match was played,
+  the network should give it little importance. Since the weights of a deep network cannot be read directly
+  as feature importance, the check needs permutation importance or a run without the column;
+  that check is not in the surviving code.
 
 ## What I would change today
 
